@@ -37,7 +37,7 @@ class CampusFlowApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
-        colorSchemeSeed: Colors.indigo,
+        colorSchemeSeed: Colors.red,
       ),
       home: const EcheancesPage(),
     );
@@ -104,6 +104,24 @@ class _EcheancesPageState extends State<EcheancesPage> {
     }
   }
 
+  Future<void> _modifier(Echeance e) async {
+    final result = await Navigator.push<Echeance>(
+      context,
+      MaterialPageRoute(builder: (_) => FormulairePage(initial: e)),
+    );
+    if (result != null && mounted) {
+      setState(() {
+        e.titre = result.titre;
+        e.matiere = result.matiere;
+        e.date = result.date;
+        e.description = result.description;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('« ${e.titre} » modifiée')),
+      );
+    }
+  }
+
   void _ouvrirDetail(Echeance e, bool large) {
     if (large) {
       setState(() => _selected = e);
@@ -119,6 +137,10 @@ class _EcheancesPageState extends State<EcheancesPage> {
                 _toggle(e);
                 Navigator.pop(ctx);
               },
+              onEdit: () async {
+                Navigator.pop(ctx);
+                await _modifier(e);
+              },
             ),
           ),
         ),
@@ -132,18 +154,38 @@ class _EcheancesPageState extends State<EcheancesPage> {
       return const Center(child: Text('Aucune échéance ici.'));
     }
     return ListView.builder(
+      padding: const EdgeInsets.only(top: 6, bottom: 88),
       itemCount: data.length,
       itemBuilder: (context, i) {
         final e = data[i];
-        return ListTile(
-          leading: Icon(
-            e.fait ? Icons.check_circle : Icons.schedule,
-            color: e.fait ? Colors.green : null,
+        final selected = large && e == _selected;
+        final scheme = Theme.of(context).colorScheme;
+        return Card(
+          elevation: 0,
+          clipBehavior: Clip.antiAlias,
+          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(
+              color: selected ? scheme.primary : scheme.outline,
+              width: selected ? 2 : 1.5,
+            ),
           ),
-          title: Text(e.titre),
-          subtitle: Text('${e.matiere} · ${formatDate(e.date)}'),
-          selected: large && e == _selected,
-          onTap: () => _ouvrirDetail(e, large),
+          child: ListTile(
+            leading: Icon(
+              e.fait ? Icons.check_circle : Icons.schedule,
+              color: e.fait ? Colors.green : null,
+            ),
+            title: Text(e.titre),
+            subtitle: Text('${e.matiere} · ${formatDate(e.date)}'),
+            trailing: IconButton(
+              icon: const Icon(Icons.edit_outlined),
+              tooltip: 'Modifier',
+              onPressed: () => _modifier(e),
+            ),
+            selected: selected,
+            onTap: () => _ouvrirDetail(e, large),
+          ),
         );
       },
     );
@@ -169,6 +211,7 @@ class _EcheancesPageState extends State<EcheancesPage> {
                     : DetailView(
                   echeance: _selected!,
                   onToggle: () => _toggle(_selected!),
+                  onEdit: () => _modifier(_selected!),
                 ),
               ),
             ],
@@ -208,10 +251,16 @@ class _EcheancesPageState extends State<EcheancesPage> {
 // TÂCHE 2 : Écran Détail
 // ---------------------------------------------------------------
 class DetailView extends StatelessWidget {
-  const DetailView({super.key, required this.echeance, required this.onToggle});
+  const DetailView({
+    super.key,
+    required this.echeance,
+    required this.onToggle,
+    required this.onEdit,
+  });
 
   final Echeance echeance;
   final VoidCallback onToggle;
+  final VoidCallback onEdit;
 
   @override
   Widget build(BuildContext context) {
@@ -222,6 +271,12 @@ class DetailView extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Card(
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(
+                  color: Theme.of(context).colorScheme.outline, width: 1.5),
+            ),
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
@@ -246,6 +301,12 @@ class DetailView extends StatelessWidget {
             icon: Icon(e.fait ? Icons.undo : Icons.check),
             label: Text(e.fait ? 'Remettre à faire' : 'Marquer comme fait'),
           ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: onEdit,
+            icon: const Icon(Icons.edit_outlined),
+            label: const Text('Modifier'),
+          ),
         ],
       ),
     );
@@ -256,7 +317,10 @@ class DetailView extends StatelessWidget {
 // TÂCHE 3 : Formulaire
 // ---------------------------------------------------------------
 class FormulairePage extends StatefulWidget {
-  const FormulairePage({super.key});
+  const FormulairePage({super.key, this.initial});
+
+  /// Si non nul, le formulaire est en mode modification.
+  final Echeance? initial;
 
   @override
   State<FormulairePage> createState() => _FormulairePageState();
@@ -269,6 +333,21 @@ class _FormulairePageState extends State<FormulairePage> {
   final _description = TextEditingController();
   final _dateCtrl = TextEditingController();
   DateTime? _date;
+
+  bool get _edition => widget.initial != null;
+
+  @override
+  void initState() {
+    super.initState();
+    final e = widget.initial;
+    if (e != null) {
+      _titre.text = e.titre;
+      _matiere.text = e.matiere;
+      _description.text = e.description;
+      _date = e.date;
+      _dateCtrl.text = formatDate(e.date);
+    }
+  }
 
   @override
   void dispose() {
@@ -284,7 +363,9 @@ class _FormulairePageState extends State<FormulairePage> {
     final d = await showDatePicker(
       context: context,
       initialDate: _date ?? now,
-      firstDate: now.subtract(const Duration(days: 1)),
+      firstDate: (_date != null && _date!.isBefore(now))
+          ? _date!
+          : now.subtract(const Duration(days: 1)),
       lastDate: now.add(const Duration(days: 365 * 2)),
     );
     if (d != null) {
@@ -319,7 +400,9 @@ class _FormulairePageState extends State<FormulairePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Nouvelle échéance')),
+      appBar: AppBar(
+        title: Text(_edition ? 'Modifier l\'échéance' : 'Nouvelle échéance'),
+      ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Form(
